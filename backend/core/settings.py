@@ -5,7 +5,7 @@ load_dotenv()
 
 
 class Settings:
-    DB=os.getenv("DB","")
+    DB=os.getenv("DB")
 
 
 
