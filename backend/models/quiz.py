@@ -33,6 +33,7 @@ class Quiz(Base, TimestampMixin):
     quiz_questions: Mapped[List["QuizQuestion"]] = relationship(back_populates="quiz")
     exam_quizzes: Mapped[List["ExamQuiz"]] = relationship(back_populates="quiz")
     class_targets: Mapped[List["QuizClassTarget"]] = relationship(back_populates="quiz")
+    attempts: Mapped[List["QuizAttempt"]] = relationship(back_populates="quiz")
 
 
 class QuizClassTarget(Base):

@@ -8,6 +8,7 @@ from models.student import Student, StudentClass
 from models.catalog import ExamType, Topic
 from models.question import Question, QuizQuestion
 from models.quiz import Quiz, QuizClassTarget
+from models.quiz_attempt import QuizAttempt, QuizAnswer
 from models.entrance import ExamSlot, ExamRegistration, SlotHold
 from models.payment import Payment
 from models.exam import Exam, ExamQuiz, ExamTopicWeight, ExamInvitation
@@ -40,6 +41,8 @@ __all__ = [
     "QuizQuestion",
     "Quiz",
     "QuizClassTarget",
+    "QuizAttempt",
+    "QuizAnswer",
     "ExamSlot",
     "ExamRegistration",
     "SlotHold",
