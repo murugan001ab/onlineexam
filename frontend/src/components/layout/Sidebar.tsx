@@ -7,12 +7,15 @@ import { cn, humanizeRole } from "@/lib/utils";
 
 interface SidebarProps {
   role: RoleName;
+  studentStage?: "applicant" | "enrolled" | null;
   open: boolean;
   onClose: () => void;
 }
 
-export function Sidebar({ role, open, onClose }: SidebarProps) {
-  const items = NAV_BY_ROLE[role];
+export function Sidebar({ role, studentStage, open, onClose }: SidebarProps) {
+  const items = role === "student" && studentStage === "applicant"
+    ? NAV_BY_ROLE[role].filter((item) => item.to === "/dashboard" || item.to === "/entrance")
+    : NAV_BY_ROLE[role];
 
   return (
     <>
@@ -33,7 +36,7 @@ export function Sidebar({ role, open, onClose }: SidebarProps) {
       >
         <div className="flex items-center justify-between gap-3 px-6 py-6">
           <div className="flex items-center gap-3">
-            <div className="flex size-10 items-center justify-center rounded-xl bg-gradient-to-br from-brand-500 to-accent-500 shadow-lg shadow-brand-500/30">
+            <div className="flex size-10 items-center justify-center rounded-xl bg-linear-to-br from-brand-500 to-accent-500 shadow-lg shadow-brand-500/30">
               <GraduationCap className="size-5 text-white" />
             </div>
             <div>
@@ -62,7 +65,7 @@ export function Sidebar({ role, open, onClose }: SidebarProps) {
                   "group relative flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-colors duration-200",
                   isActive
                     ? "text-white"
-                    : "text-slate-400 hover:bg-white/[0.04] hover:text-slate-100",
+                    : "text-slate-400 hover:bg-white/4 hover:text-slate-100",
                 )
               }
             >
@@ -71,11 +74,11 @@ export function Sidebar({ role, open, onClose }: SidebarProps) {
                   {isActive && (
                     <motion.span
                       layoutId="active-nav-pill"
-                      className="absolute inset-0 rounded-xl bg-gradient-to-r from-brand-600/80 to-brand-500/60 shadow-lg shadow-brand-600/20"
+                      className="absolute inset-0 rounded-xl bg-linear-to-r from-brand-600/80 to-brand-500/60 shadow-lg shadow-brand-600/20"
                       transition={{ type: "spring", stiffness: 400, damping: 32 }}
                     />
                   )}
-                  <item.icon className="relative z-10 size-[18px] shrink-0" />
+                  <item.icon className="relative z-10 size-4.5 shrink-0" />
                   <span className="relative z-10">{item.label}</span>
                 </>
               )}

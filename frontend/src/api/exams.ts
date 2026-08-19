@@ -2,6 +2,9 @@ import { apiClient } from "@/api/client";
 import type {
   ExamCreate,
   ExamOut,
+  ExamProblemAssign,
+  ExamProblemOut,
+  ExamProblemUpdate,
   ExamQuizAssign,
   ExamQuizOut,
   ExamQuizUpdate,
@@ -49,6 +52,16 @@ export const examsApi = {
     await apiClient.delete(`/admin/exams/${examId}/quizzes/${examQuizId}`);
   },
 
+  listProblems: async (examId: number) =>
+    (await apiClient.get<ExamProblemOut[]>(`/admin/exams/${examId}/problems`)).data,
+  assignProblem: async (examId: number, payload: ExamProblemAssign) =>
+    (await apiClient.post<ExamProblemOut>(`/admin/exams/${examId}/problems`, payload)).data,
+  updateProblemLink: async (examId: number, examProblemId: number, payload: ExamProblemUpdate) =>
+    (await apiClient.patch<ExamProblemOut>(`/admin/exams/${examId}/problems/${examProblemId}`, payload)).data,
+  unassignProblem: async (examId: number, examProblemId: number) => {
+    await apiClient.delete(`/admin/exams/${examId}/problems/${examProblemId}`);
+  },
+
   listTopicWeights: async (examId: number) =>
     (await apiClient.get<ExamTopicWeightOut[]>(`/admin/exams/${examId}/topic-weights`)).data,
   addTopicWeight: async (examId: number, payload: ExamTopicWeightCreate) =>
@@ -62,7 +75,7 @@ export const examsApi = {
 };
 
 export const examSlotsApi = {
-  list: async (params?: { status_?: string }) =>
+  list: async (params?: { exam_id?: number; status_?: string }) =>
     (await apiClient.get<ExamSlotOut[]>("/admin/exam-slots", { params })).data,
   create: async (payload: ExamSlotCreate) =>
     (await apiClient.post<ExamSlotOut>("/admin/exam-slots", payload)).data,

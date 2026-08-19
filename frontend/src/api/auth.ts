@@ -24,3 +24,9 @@ export async function changePassword(payload: ChangePasswordRequest): Promise<vo
 export function logout() {
   tokenStorage.clear();
 }
+
+export async function redeemInvitation(token: string, new_password: string): Promise<MeResponse> {
+  const { data } = await apiClient.post<TokenResponse>("/auth/redeem-invitation", { token, new_password });
+  tokenStorage.setTokens(data.access_token, data.refresh_token);
+  return fetchMe();
+}

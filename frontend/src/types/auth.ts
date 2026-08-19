@@ -23,6 +23,7 @@ export interface MeResponse {
   role: RoleName;
   college_id: number | null;
   is_active: boolean;
+  student_stage: "applicant" | "enrolled" | null;
 }
 
 export interface ChangePasswordRequest {

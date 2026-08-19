@@ -10,6 +10,7 @@ StudentStage = Literal["applicant", "enrolled"]
 
 
 class StudentCreate(BaseModel):
+    email: Optional[str] = None
     register_number: Optional[str] = Field(default=None, max_length=100)
     application_number: Optional[str] = Field(default=None, max_length=100)
     stage: StudentStage = "applicant"
@@ -21,6 +22,7 @@ class StudentCreate(BaseModel):
 
 
 class StudentUpdate(BaseModel):
+    email: Optional[str] = None
     register_number: Optional[str] = Field(default=None, max_length=100)
     application_number: Optional[str] = Field(default=None, max_length=100)
     stage: Optional[StudentStage] = None
@@ -37,6 +39,7 @@ class StudentOut(BaseModel):
 
     id: int
     college_id: int
+    email: Optional[str] = None
     register_number: Optional[str] = None
     application_number: Optional[str] = None
     stage: str

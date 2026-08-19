@@ -11,6 +11,7 @@ import {
   School,
   HelpCircle,
   Layers,
+  CalendarClock,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { RoleName } from "@/types/auth";
@@ -38,12 +39,14 @@ export const NAV_BY_ROLE: Record<RoleName, NavItem[]> = {
     { label: "Departments", to: "/departments", icon: School },
     { label: "Classes", to: "/classes", icon: GraduationCap },
     { label: "Staff", to: "/staff", icon: Users },
+    { label: "Students", to: "/students", icon: GraduationCap },
+    { label: "Applied Students", to: "/applications", icon: ClipboardList },
     { label: "Topics", to: "/topics", icon: BookOpen },
     { label: "Questions", to: "/questions", icon: HelpCircle },
     { label: "Problems", to: "/problems", icon: Code2 },
     { label: "Exams", to: "/exams", icon: FileSpreadsheet },
+    { label: "Exam Slots", to: "/exam-slots", icon: CalendarClock },
     { label: "Quizzes", to: "/quizzes", icon: ListChecks },
-    { label: "Submissions", to: "/submissions", icon: ClipboardList },
   ],
   staff: [
     { label: "Dashboard", to: "/dashboard", icon: LayoutDashboard },
@@ -52,13 +55,12 @@ export const NAV_BY_ROLE: Record<RoleName, NavItem[]> = {
     { label: "Questions", to: "/questions", icon: HelpCircle },
     { label: "Problems", to: "/problems", icon: Code2 },
     { label: "Exams", to: "/exams", icon: FileSpreadsheet },
+    { label: "Exam Slots", to: "/exam-slots", icon: CalendarClock },
     { label: "Quizzes", to: "/quizzes", icon: ListChecks },
-    { label: "Submissions", to: "/submissions", icon: ClipboardList },
   ],
   student: [
     { label: "Dashboard", to: "/dashboard", icon: LayoutDashboard },
-    { label: "Exams", to: "/exams", icon: FileSpreadsheet },
-    { label: "Quizzes", to: "/quizzes", icon: ListChecks },
-    { label: "My Results", to: "/results", icon: ClipboardList },
+    { label: "Entrance Exam", to: "/entrance", icon: FileSpreadsheet },
+    // { label: "Class Quizzes", to: "/student-quizzes", icon: ListChecks },
   ],
 };

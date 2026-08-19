@@ -162,6 +162,44 @@ class SubmissionOut(BaseModel):
     created_at: datetime
 
 
+class SubmissionAdminOut(SubmissionOut):
+    """Staff/admin review view — adds student and problem context, plus the
+    submitted code, so a submissions list doesn't require N follow-up
+    lookups."""
+
+    code: Optional[str] = None
+    student_id: int
+    student_username: Optional[str] = None
+    problem_title: Optional[str] = None
+    passed_count: Optional[int] = None
+    total_count: Optional[int] = None
+
+    @classmethod
+    def from_submission(cls, sub, *, student_username: Optional[str], problem_title: Optional[str]) -> "SubmissionAdminOut":
+        results = sub.results if isinstance(sub.results, list) else None
+        passed_count = sum(1 for r in results if r.get("passed")) if results else None
+        total_count = len(results) if results else None
+        return cls(
+            id=sub.id,
+            uuid=sub.uuid,
+            problem_id=sub.problem_id,
+            user_id=sub.user_id,
+            language=sub.language,
+            code=sub.code,
+            status=sub.status,
+            score=sub.score,
+            max_score=sub.max_score,
+            runtime_ms=sub.runtime_ms,
+            results=sub.results,
+            created_at=sub.created_at,
+            student_id=sub.user_id,
+            student_username=student_username,
+            problem_title=problem_title,
+            passed_count=passed_count,
+            total_count=total_count,
+        )
+
+
 # -------------------------------------------------------------------- unlock
 
 class ProblemUnlockOut(BaseModel):

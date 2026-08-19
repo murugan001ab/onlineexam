@@ -21,7 +21,9 @@ export function DashboardPage() {
   const navigate = useNavigate();
   if (!user) return null;
 
-  const modules = NAV_BY_ROLE[user.role].filter((n) => n.to !== "/dashboard");
+  const modules = NAV_BY_ROLE[user.role].filter((n) => n.to !== "/dashboard").filter((n) =>
+    user.role !== "student" || user.student_stage !== "applicant" || n.to === "/entrance",
+  );
 
   return (
     <div>

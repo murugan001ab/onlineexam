@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useNavigate, useLocation, Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import { GraduationCap, Lock, User, ArrowRight, ShieldCheck, Sparkles } from "lucide-react";
 import toast from "react-hot-toast";
@@ -138,6 +138,12 @@ export function LoginPage() {
 
           <p className="mt-8 text-center text-xs text-slate-600">
             Trouble signing in? Contact your college administrator.
+          </p>
+          <p className="mt-3 text-center text-xs text-slate-500">
+            Applying to a college for the first time?{" "}
+            <Link to="/signup" className="font-medium text-brand-300 hover:text-brand-200">
+              Create an applicant account
+            </Link>
           </p>
         </motion.div>
       </div>

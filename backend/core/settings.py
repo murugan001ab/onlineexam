@@ -48,3 +48,37 @@ class Settings:
     LLM_PROVIDER = os.getenv("LLM_PROVIDER", "ollama")
     OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
     OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:7b")
+
+    # Exam invitation email. Leave SMTP_HOST empty for local development;
+    # invitations will be logged instead of failing registration.
+    SMTP_HOST = os.getenv("SMTP_HOST", "")
+    SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+    SMTP_USERNAME = os.getenv("SMTP_USERNAME", "")
+    SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+    SMTP_FROM = os.getenv("SMTP_FROM", SMTP_USERNAME or "no-reply@example.com")
+    SMTP_USE_SSL = os.getenv("SMTP_USE_SSL", "false").lower() == "true"
+    FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+    AUTO_SEND_EXAM_INVITATION = os.getenv("AUTO_SEND_EXAM_INVITATION", "false").lower() == "true"
+
+    # Public applicant signup: email/mobile OTP verification.
+    OTP_LENGTH = int(os.getenv("OTP_LENGTH", "6"))
+    OTP_EXPIRE_MINUTES = int(os.getenv("OTP_EXPIRE_MINUTES", "10"))
+    OTP_RESEND_SECONDS = int(os.getenv("OTP_RESEND_SECONDS", "30"))
+    OTP_MAX_ATTEMPTS = int(os.getenv("OTP_MAX_ATTEMPTS", "5"))
+    # How long a verified OTP stays "usable" to complete signup after the
+    # code was confirmed, so the applicant doesn't have to re-verify just
+    # because filling out the rest of the form took a few minutes.
+    OTP_VERIFIED_TTL_MINUTES = int(os.getenv("OTP_VERIFIED_TTL_MINUTES", "30"))
+
+    # "console" (default) just logs the SMS instead of sending it — see
+    # utils/sms.py. Set to a real provider name once one is wired up there.
+    SMS_PROVIDER = os.getenv("SMS_PROVIDER", "console")
+
+    # Local-disk storage for applicant documents (marksheets/age proof) and
+    # proctoring snapshots. Served back at BACKEND_PUBLIC_URL/uploads/*.
+    UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploads")
+    BACKEND_PUBLIC_URL = os.getenv("BACKEND_PUBLIC_URL", "http://localhost:8000")
+
+    # scripts/send_exam_reminders.py: send the "your exam is coming up" mail
+    # to confirmed registrants whose exam starts within this many hours.
+    EXAM_REMINDER_HOURS_BEFORE = int(os.getenv("EXAM_REMINDER_HOURS_BEFORE", "24"))

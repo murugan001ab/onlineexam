@@ -22,6 +22,7 @@ class Student(Base, TimestampMixin):
     # null until an invite creates the login (applicant stage)
     user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), unique=True)
     profile_id: Mapped[Optional[int]] = mapped_column(ForeignKey("profiles.id"))
+    email: Mapped[Optional[str]] = mapped_column(String(255))
 
     register_number: Mapped[Optional[str]] = mapped_column(String(100))
     application_number: Mapped[Optional[str]] = mapped_column(String(100))

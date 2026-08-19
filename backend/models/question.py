@@ -24,6 +24,10 @@ class Question(Base, TimestampMixin):
     correct_answer: Mapped[Optional[Any]] = mapped_column(JSONB)
     explanation: Mapped[Optional[str]] = mapped_column(Text)
 
+    # Optional question image (diagrams, code screenshots, aptitude figures etc.)
+    # Stored as a relative path served under /uploads — see utils/storage.py.
+    image_url: Mapped[Optional[str]] = mapped_column(String(500))
+
     # easy | medium | hard
     difficulty: Mapped[Optional[str]] = mapped_column(String(30))
     marks: Mapped[int] = mapped_column(Integer, default=1, server_default="1")

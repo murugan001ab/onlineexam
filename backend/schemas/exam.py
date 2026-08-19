@@ -2,7 +2,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 ExamStatus = Literal["draft", "published", "running", "completed", "cancelled"]
 SlotStatus = Literal["open", "closed", "cancelled"]
@@ -40,6 +40,16 @@ class ExamCreate(BaseModel):
     fee: Optional[Decimal] = Field(default=None, ge=0)
     fee_currency: str = Field(default="INR", max_length=10)
     status: ExamStatus = "draft"
+    proctoring_enabled: bool = True
+    fullscreen_required: bool = True
+    camera_required: bool = False
+    max_tab_switch_warnings: int = Field(default=3, ge=0)
+
+    @model_validator(mode="after")
+    def _check_schedule(self) -> "ExamCreate":
+        if self.starts_at and self.ends_at and self.ends_at <= self.starts_at:
+            raise ValueError("ends_at must be after starts_at")
+        return self
 
 
 class ExamUpdate(BaseModel):
@@ -52,6 +62,16 @@ class ExamUpdate(BaseModel):
     fee: Optional[Decimal] = Field(default=None, ge=0)
     fee_currency: Optional[str] = Field(default=None, max_length=10)
     status: Optional[ExamStatus] = None
+    proctoring_enabled: Optional[bool] = None
+    fullscreen_required: Optional[bool] = None
+    camera_required: Optional[bool] = None
+    max_tab_switch_warnings: Optional[int] = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def _check_schedule(self) -> "ExamUpdate":
+        if self.starts_at and self.ends_at and self.ends_at <= self.starts_at:
+            raise ValueError("ends_at must be after starts_at")
+        return self
 
 
 class ExamOut(BaseModel):
@@ -69,8 +89,34 @@ class ExamOut(BaseModel):
     fee: Optional[Decimal] = None
     fee_currency: str = "INR"
     status: Optional[str] = None
+    public_slug: Optional[str] = None
+    public_url: Optional[str] = None
+    proctoring_enabled: bool = True
+    fullscreen_required: bool = True
+    camera_required: bool = False
+    max_tab_switch_warnings: int = 3
+    registration_count: int = 0
+    slot_count: int = 0
     created_by: int
     created_at: datetime
+
+
+class ExamPublicOut(BaseModel):
+    """Unauthenticated view served from /public/exams/{slug} — the page an
+    applicant lands on from a WhatsApp/poster/QR link, before they sign up
+    or log in. Deliberately excludes fee internals, created_by, etc."""
+
+    name: str
+    description: Optional[str] = None
+    exam_type_name: Optional[str] = None
+    college_name: str
+    starts_at: Optional[datetime] = None
+    ends_at: Optional[datetime] = None
+    duration_minutes: Optional[int] = None
+    fee: Optional[Decimal] = None
+    fee_currency: str = "INR"
+    status: Optional[str] = None
+    open_slot_count: int = 0
 
 
 # ---------------------------------------------------------------- exam quiz
@@ -94,6 +140,29 @@ class ExamQuizOut(BaseModel):
     quiz_name: str
     order_index: Optional[int] = None
     weight: Optional[Decimal] = None
+
+
+# ------------------------------------------------------------- exam problem
+
+class ExamProblemAssign(BaseModel):
+    problem_id: int
+    order_index: Optional[int] = None
+    marks: Optional[Decimal] = None
+
+
+class ExamProblemUpdate(BaseModel):
+    order_index: Optional[int] = None
+    marks: Optional[Decimal] = None
+
+
+class ExamProblemOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    problem_id: int
+    problem_title: str
+    order_index: Optional[int] = None
+    marks: Optional[Decimal] = None
 
 
 # --------------------------------------------------------- exam topic weight
@@ -122,6 +191,7 @@ class ExamTopicWeightOut(BaseModel):
 # ------------------------------------------------------------------ slots
 
 class ExamSlotCreate(BaseModel):
+    exam_id: int
     name: Optional[str] = Field(default=None, max_length=100)
     starts_at: datetime
     ends_at: datetime
@@ -142,6 +212,7 @@ class ExamSlotOut(BaseModel):
 
     id: int
     college_id: int
+    exam_id: Optional[int] = None
     name: Optional[str] = None
     starts_at: datetime
     ends_at: datetime

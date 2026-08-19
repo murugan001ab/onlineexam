@@ -2,7 +2,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import List, Optional
 
-from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from core.database import Base
@@ -31,11 +31,28 @@ class Exam(Base, TimestampMixin):
     # draft | published | running | completed | cancelled
     status: Mapped[Optional[str]] = mapped_column(String(30))
 
+    # Short, URL-safe, globally-unique slug used for the public share link
+    # admins hand out (WhatsApp/poster/QR/portal): FRONTEND_URL/e/{public_slug}.
+    # Unlike ExamInvitation.exam_token_hash (per-student, issued after
+    # registration closes), this is a single link anyone can open to land on
+    # the exam's public info + "apply" page.
+    public_slug: Mapped[Optional[str]] = mapped_column(String(60), unique=True, index=True)
+
+    # ---- proctoring / secure-exam configuration (see models/proctoring.py) ----
+    proctoring_enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    fullscreen_required: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    camera_required: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # tab_switch / window_blur / fullscreen_exit events allowed before the
+    # attempt is auto-disqualified by routers/proctoring.py.
+    max_tab_switch_warnings: Mapped[int] = mapped_column(Integer, default=3, server_default="3")
+
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
 
     exam_type: Mapped["ExamType"] = relationship(back_populates="exams")
     registrations: Mapped[List["ExamRegistration"]] = relationship(back_populates="exam")
+    slots: Mapped[List["ExamSlot"]] = relationship(back_populates="exam")
     exam_quizzes: Mapped[List["ExamQuiz"]] = relationship(back_populates="exam")
+    exam_problems: Mapped[List["ExamProblem"]] = relationship(back_populates="exam")
     topic_weights: Mapped[List["ExamTopicWeight"]] = relationship(back_populates="exam")
     invitations: Mapped[List["ExamInvitation"]] = relationship(back_populates="exam")
     attempts: Mapped[List["ExamAttempt"]] = relationship(back_populates="exam")
@@ -54,6 +71,27 @@ class ExamQuiz(Base):
 
     exam: Mapped["Exam"] = relationship(back_populates="exam_quizzes")
     quiz: Mapped["Quiz"] = relationship(back_populates="exam_quizzes")
+
+
+class ExamProblem(Base):
+    """Attaches a coding Problem (see models/problem.py) directly to an exam,
+    alongside the MCQ quizzes in ExamQuiz — lets one entrance exam mix MCQ,
+    true/false and code sections. Grading for the code section reads the
+    student's best Submission for (problem_id, user) within the attempt
+    window; see routers/attempt.py."""
+
+    __tablename__ = "exam_problems"
+    __table_args__ = (UniqueConstraint("exam_id", "problem_id", name="uq_exam_problem"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    exam_id: Mapped[int] = mapped_column(ForeignKey("exams.id"), nullable=False)
+    problem_id: Mapped[int] = mapped_column(ForeignKey("problems.id"), nullable=False)
+
+    order_index: Mapped[Optional[int]] = mapped_column(Integer)
+    marks: Mapped[Optional[Decimal]] = mapped_column(Numeric(8, 2))
+
+    exam: Mapped["Exam"] = relationship(back_populates="exam_problems")
+    problem: Mapped["Problem"] = relationship()
 
 
 class ExamTopicWeight(Base):

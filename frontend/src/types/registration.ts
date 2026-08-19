@@ -1,0 +1,3 @@
+export interface ExamRegistrationOut { id: number; college_id: number; student_id: number; exam_id: number; exam_name: string | null; slot_id: number | null; registration_number: string | null; status: string; fee: number | string | null; fee_currency: string; registered_at: string | null; confirmed_at: string | null; }
+export interface ExamInvitationOut { id: number; exam_id: number; student_id: number; registration_id: number | null; user_id: number | null; username: string | null; sent_at: string | null; expires_at: string | null; status: string | null; created_at: string; }
+export interface ExamInvitationWithToken extends ExamInvitationOut { token: string; }

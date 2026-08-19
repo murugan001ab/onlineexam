@@ -18,6 +18,11 @@ class ExamSlot(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     college_id: Mapped[int] = mapped_column(ForeignKey("colleges.id"), nullable=False)
 
+    # Which exam this sitting belongs to. Nullable at the DB level only so the
+    # migration doesn't break any pre-existing rows; every code path that
+    # creates a slot (routers/exam.py) requires it via ExamSlotCreate.exam_id.
+    exam_id: Mapped[Optional[int]] = mapped_column(ForeignKey("exams.id"), index=True)
+
     name: Mapped[Optional[str]] = mapped_column(String(100))
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -26,6 +31,7 @@ class ExamSlot(Base, TimestampMixin):
     # open | closed | cancelled
     status: Mapped[Optional[str]] = mapped_column(String(30))
 
+    exam: Mapped[Optional["Exam"]] = relationship(back_populates="slots")
     registrations: Mapped[List["ExamRegistration"]] = relationship(back_populates="slot")
     holds: Mapped[List["SlotHold"]] = relationship(back_populates="slot")
 
@@ -47,6 +53,10 @@ class ExamRegistration(Base):
 
     registered_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    # Set by scripts/send_exam_reminders.py once the "exam is coming up"
+    # reminder mail has gone out, so the cron job never double-sends.
+    reminder_sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
     student: Mapped["Student"] = relationship()
     exam: Mapped["Exam"] = relationship(back_populates="registrations")

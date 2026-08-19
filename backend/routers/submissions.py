@@ -1,15 +1,18 @@
 import uuid as uuid_lib
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
-from core.deps import STAFF_ROLES, CurrentUser, DbSession
+from core.deps import STAFF_ROLES, CurrentUser, DbSession, require_roles
+from models.auth import User
 from models.problem import Problem, Submission
-from schemas.problem import SubmissionCreate, SubmissionOut
+from schemas.problem import SubmissionAdminOut, SubmissionCreate, SubmissionOut
 from utils.code_runner import grade_submission
 
 router = APIRouter(prefix="/submissions", tags=["submissions"])
+admin_router = APIRouter(prefix="/admin/submissions", tags=["submissions"])
 
 
 @router.post("", response_model=SubmissionOut, status_code=status.HTTP_201_CREATED)
@@ -60,3 +63,47 @@ def get_submission(submission_id: int, db: DbSession, user: CurrentUser):
     if submission.user_id != user.id and not is_staff:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not your submission")
     return submission
+
+
+# --------------------------------------------------------- staff/admin review
+
+@admin_router.get("", response_model=list[SubmissionAdminOut])
+def list_college_submissions(
+    db: DbSession,
+    user: User = Depends(require_roles(*STAFF_ROLES)),
+    problem_id: Optional[int] = None,
+    student_id: Optional[int] = None,
+    status_: Optional[str] = None,
+):
+    """All submissions for the caller's college, for staff/admin to review."""
+    stmt = (
+        select(Submission)
+        .where(Submission.college_id == user.college_id)
+        .options(selectinload(Submission.problem))
+        .order_by(Submission.id.desc())
+    )
+    if problem_id is not None:
+        stmt = stmt.where(Submission.problem_id == problem_id)
+    if student_id is not None:
+        stmt = stmt.where(Submission.user_id == student_id)
+    if status_ is not None:
+        stmt = stmt.where(Submission.status == status_)
+
+    submissions = db.execute(stmt).scalars().all()
+    if not submissions:
+        return []
+
+    student_ids = {s.user_id for s in submissions}
+    students = db.execute(
+        select(User).where(User.id.in_(student_ids))
+    ).scalars().all()
+    username_by_id = {u.id: u.username for u in students}
+
+    return [
+        SubmissionAdminOut.from_submission(
+            s,
+            student_username=username_by_id.get(s.user_id),
+            problem_title=s.problem.title if s.problem else None,
+        )
+        for s in submissions
+    ]

@@ -31,6 +31,7 @@ RequireStaff = Depends(require_roles(*STAFF_ROLES))
 def _serialize(student: Student) -> StudentOut:
     return StudentOut(
         id=student.id,
+        email=student.email,
         college_id=student.college_id,
         register_number=student.register_number,
         application_number=student.application_number,
@@ -104,6 +105,7 @@ def create_student(payload: StudentCreate, db: DbSession, user: User = RequireSt
     student = Student(
         college_id=user.college_id,
         profile_id=profile.id,
+        email=payload.email,
         register_number=payload.register_number,
         application_number=payload.application_number,
         stage=payload.stage,
@@ -295,6 +297,7 @@ def provision_student_login(
     new_user = User(
         college_id=student.college_id,
         profile_id=student.profile_id,
+        email=student.email,
         role_id=student_role.id,
         username=username,
         password_hash=hash_password(temp_password),

@@ -17,6 +17,7 @@ from models.entrance import ExamRegistration, ExamSlot, SlotHold
 from models.exam import Exam, ExamInvitation
 from models.payment import Payment
 from models.student import Student
+from schemas.exam import ExamOut, ExamSlotOut
 from schemas.registration import (
     ExamInvitationOut,
     ExamInvitationWithToken,
@@ -30,7 +31,8 @@ from schemas.registration import (
     SlotHoldCreate,
     SlotHoldOut,
 )
-from utils.payments import create_order, verify_signature
+from utils.payments import create_order, is_live, verify_signature
+from utils.email import send_exam_invitation, send_registration_confirmation
 
 student_router = APIRouter(prefix="/entrance", tags=["entrance-exam-registration"])
 admin_router = APIRouter(prefix="/admin", tags=["entrance-exam-registration"])
@@ -80,9 +82,68 @@ def _serialize_registration(reg: ExamRegistration) -> ExamRegistrationOut:
     )
 
 
+def _serialize_slot(db: DbSession, slot: ExamSlot) -> ExamSlotOut:
+    booked = _slot_booked_count(db, slot.id)
+    return ExamSlotOut(
+        id=slot.id,
+        college_id=slot.college_id,
+        exam_id=slot.exam_id,
+        name=slot.name,
+        starts_at=slot.starts_at,
+        ends_at=slot.ends_at,
+        max_capacity=slot.max_capacity,
+        status=slot.status,
+        booked_count=booked,
+        available=max(slot.max_capacity - booked, 0),
+    )
+
+
 # ==================================================================
-# Student-facing: slot holds, registration, payment
+# Student-facing: browse exams/slots, holds, registration, payment
 # ==================================================================
+
+@student_router.get("/exams", response_model=list[ExamOut])
+def list_open_exams(db: DbSession, user: User = RequireStudent):
+    """Published exams open for application, scoped to the caller's college.
+    Unlike /admin/exams (staff-only), this is reachable by the 'student' role."""
+    student = _get_student_or_404(db, user)
+    exams = db.execute(
+        select(Exam)
+        .where(Exam.college_id == student.college_id, Exam.status == "published")
+        .options(selectinload(Exam.exam_type))
+        .order_by(Exam.starts_at)
+    ).scalars().all()
+    return [
+        ExamOut(
+            id=e.id, college_id=e.college_id, name=e.name, description=e.description,
+            exam_type_id=e.exam_type_id, exam_type_name=e.exam_type.name if e.exam_type else None,
+            starts_at=e.starts_at, ends_at=e.ends_at, duration_minutes=e.duration_minutes,
+            fee=e.fee, fee_currency=e.fee_currency, status=e.status, created_by=e.created_by,
+            created_at=e.created_at,
+        )
+        for e in exams
+    ]
+
+
+@student_router.get("/slots", response_model=list[ExamSlotOut])
+def list_open_slots(db: DbSession, exam_id: int, user: User = RequireStudent):
+    """Open exam slots for a specific exam, scoped to the caller's college.
+    Unlike /admin/exam-slots (staff-only), this is reachable by the 'student'
+    role. `exam_id` is required — slots are per-exam, so without it a
+    student would see every other exam's sittings mixed in."""
+    student = _get_student_or_404(db, user)
+    exam = db.execute(
+        select(Exam).where(Exam.id == exam_id, Exam.college_id == student.college_id)
+    ).scalar_one_or_none()
+    if exam is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Exam not found")
+    slots = db.execute(
+        select(ExamSlot)
+        .where(ExamSlot.exam_id == exam_id, ExamSlot.college_id == student.college_id, ExamSlot.status == "open")
+        .order_by(ExamSlot.starts_at)
+    ).scalars().all()
+    return [_serialize_slot(db, s) for s in slots]
+
 
 @student_router.post("/slots/{slot_id}/hold", response_model=SlotHoldOut, status_code=status.HTTP_201_CREATED)
 def hold_slot(slot_id: int, db: DbSession, user: User = RequireStudent):
@@ -179,6 +240,19 @@ def create_registration(payload: RegistrationCreate, db: DbSession, user: User =
     reg = db.execute(
         select(ExamRegistration).where(ExamRegistration.id == reg.id).options(selectinload(ExamRegistration.exam))
     ).scalar_one()
+
+    # Confirmation mail goes out immediately for free exams (already
+    # "confirmed" above); paid exams get theirs from verify_payment() once
+    # the payment actually clears.
+    if reg.status == "confirmed":
+        send_registration_confirmation(
+            to_email=student.email,
+            student_name=student.profile.name if student.profile else (user.username or "Student"),
+            exam_name=reg.exam.name,
+            registration_number=reg.registration_number,
+            exam_starts_at=reg.exam.starts_at,
+            fee_paid=False,
+        )
     return _serialize_registration(reg)
 
 
@@ -264,6 +338,49 @@ async def create_payment_order(registration_id: int, db: DbSession, user: User =
     )
 
 
+def _finalize_paid_registration(db: DbSession, reg: ExamRegistration, student: Student, user: User) -> ExamRegistrationOut:
+    """Shared by verify_payment() and mock_confirm_payment(): flips the
+    registration to confirmed, sends the confirmation mail, and (if enabled)
+    auto-provisions the exam invitation."""
+    reg.status = "confirmed"
+    reg.confirmed_at = datetime.now(timezone.utc)
+    db.commit()
+
+    send_registration_confirmation(
+        to_email=student.email,
+        student_name=student.profile.name if student.profile else (user.username or "Student"),
+        exam_name=reg.exam.name,
+        registration_number=reg.registration_number,
+        exam_starts_at=reg.exam.starts_at,
+        fee_paid=True,
+    )
+
+    # Invitation delivery is admin-controlled by default. Set
+    # AUTO_SEND_EXAM_INVITATION=true only if automatic delivery is desired.
+    if Settings.AUTO_SEND_EXAM_INVITATION:
+        provisioned = _provision_invitation(db, reg)
+    else:
+        provisioned = None
+    if provisioned:
+        invitation, token, target_user, invite_student = provisioned
+        db.commit()
+        sent = send_exam_invitation(
+            to_email=(target_user.email if target_user and target_user.email else invite_student.email),
+            student_name=invite_student.profile.name if invite_student.profile else (target_user.username if target_user else "Student"),
+            exam_name=reg.exam.name,
+            exam_starts_at=reg.exam.starts_at,
+            invitation_url=f"{Settings.FRONTEND_URL.rstrip('/')}/redeem-invitation?token={token}",
+            expires_at=invitation.expires_at,
+        )
+        if sent:
+            invitation.status = "sent"; invitation.sent_at = datetime.now(timezone.utc); db.commit()
+
+    reg = db.execute(
+        select(ExamRegistration).where(ExamRegistration.id == reg.id).options(selectinload(ExamRegistration.exam))
+    ).scalar_one()
+    return _serialize_registration(reg)
+
+
 @student_router.post("/payments/verify", response_model=ExamRegistrationOut)
 def verify_payment(payload: PaymentVerify, db: DbSession, user: User = RequireStudent):
     student = _get_student_or_404(db, user)
@@ -290,14 +407,38 @@ def verify_payment(payload: PaymentVerify, db: DbSession, user: User = RequireSt
     payment.signature = payload.razorpay_signature
     payment.status = "paid"
     payment.paid_at = datetime.now(timezone.utc)
-    reg.status = "confirmed"
-    reg.confirmed_at = datetime.now(timezone.utc)
-    db.commit()
+    return _finalize_paid_registration(db, reg, student, user)
 
-    reg = db.execute(
-        select(ExamRegistration).where(ExamRegistration.id == reg.id).options(selectinload(ExamRegistration.exam))
-    ).scalar_one()
-    return _serialize_registration(reg)
+
+@student_router.post("/registrations/{registration_id}/payments/mock-confirm", response_model=ExamRegistrationOut)
+def mock_confirm_payment(registration_id: int, db: DbSession, user: User = RequireStudent):
+    """Dev/local-only stand-in for the Razorpay checkout round-trip. The
+    frontend only calls this when POST .../payment-order came back with
+    key_id=null (i.e. RAZORPAY_KEY_ID/SECRET aren't configured — see
+    utils/payments.is_live()), so there is no real checkout widget to open.
+    Refuses to run once real Razorpay credentials are set, so this can never
+    be used to skip payment in production."""
+    if is_live():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Razorpay is live for this deployment — use the real checkout flow")
+
+    student = _get_student_or_404(db, user)
+    reg = _get_own_registration_or_404(db, registration_id, student)
+    if reg.status != "pending_payment":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "This registration does not have a pending payment")
+
+    payment = db.execute(
+        select(Payment)
+        .where(Payment.registration_id == reg.id, Payment.status == "created")
+        .order_by(Payment.id.desc())
+    ).scalars().first()
+    if payment is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No pending payment order for this registration — create one first")
+
+    payment.payment_id = f"mock_pay_{uuid_lib.uuid4().hex[:16]}"
+    payment.signature = "mock"
+    payment.status = "paid"
+    payment.paid_at = datetime.now(timezone.utc)
+    return _finalize_paid_registration(db, reg, student, user)
 
 
 # ==================================================================
@@ -356,6 +497,29 @@ def _generate_username(db: DbSession, base: str) -> str:
     return candidate
 
 
+def _provision_invitation(db: DbSession, reg: ExamRegistration, expires_in_hours: int = 72):
+    """Create the one-time login invitation for a confirmed registration."""
+    existing = db.execute(select(ExamInvitation).where(ExamInvitation.registration_id == reg.id)).scalar_one_or_none()
+    if existing is not None:
+        return None
+    student = db.get(Student, reg.student_id)
+    role = db.execute(select(Role).where(Role.name == "student")).scalar_one_or_none()
+    if not student or not role:
+        return None
+    if student.user_id is None:
+        username = _generate_username(db, student.application_number or student.register_number or f"stu{student.id}")
+        new_user = User(college_id=student.college_id, profile_id=student.profile_id, email=student.email,
+                        role_id=role.id, username=username, password_hash=hash_password(secrets.token_urlsafe(9)), is_active=True)
+        db.add(new_user); db.flush(); student.user_id = new_user.id
+    target_user = db.get(User, student.user_id)
+    token, token_hash = _generate_token()
+    invitation = ExamInvitation(exam_id=reg.exam_id, student_id=student.id, registration_id=reg.id,
+                                user_id=student.user_id, exam_token_hash=token_hash,
+                                expires_at=datetime.now(timezone.utc) + timedelta(hours=expires_in_hours), status="pending")
+    db.add(invitation); db.flush()
+    return invitation, token, target_user, student
+
+
 @admin_router.post(
     "/exams/{exam_id}/invitations/generate",
     response_model=list[ExamInvitationWithToken],
@@ -397,6 +561,7 @@ def generate_invitations(
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Role 'student' is not seeded")
 
     results: list[ExamInvitationWithToken] = []
+    mail_jobs = []
     expires_at = datetime.now(timezone.utc) + timedelta(hours=payload.expires_in_hours)
 
     for reg in registrations:
@@ -412,6 +577,7 @@ def generate_invitations(
             new_user = User(
                 college_id=student.college_id,
                 profile_id=student.profile_id,
+                email=student.email,
                 role_id=student_role.id,
                 username=username,
                 password_hash=hash_password(temp_password),
@@ -455,12 +621,23 @@ def generate_invitations(
                 token=token,
             )
         )
+        mail_jobs.append((invitation, token, student, db.get(User, user_id)))
 
     try:
         db.commit()
     except IntegrityError:
         db.rollback()
         raise HTTPException(status.HTTP_409_CONFLICT, "Failed to generate one or more invitations — try again")
+    for invitation, token, student, target_user in mail_jobs:
+        if send_exam_invitation(
+            to_email=(target_user.email if target_user and target_user.email else student.email),
+            student_name=student.profile.name if student.profile else (target_user.username if target_user else "Student"),
+            exam_name=exam.name, exam_starts_at=exam.starts_at,
+            invitation_url=f"{Settings.FRONTEND_URL.rstrip('/')}/redeem-invitation?token={token}",
+            expires_at=invitation.expires_at,
+        ):
+            invitation.status = "sent"; invitation.sent_at = datetime.now(timezone.utc)
+    db.commit()
     return results
 
 
@@ -505,6 +682,14 @@ def resend_invitation(invitation_id: int, db: DbSession, user: User = Depends(re
     db.commit()
 
     target_user = db.get(User, invitation.user_id) if invitation.user_id else None
+    invite_student = db.get(Student, invitation.student_id)
+    send_exam_invitation(
+        to_email=(target_user.email if target_user and target_user.email else (invite_student.email if invite_student else None)),
+        student_name=invite_student.profile.name if invite_student and invite_student.profile else (target_user.username if target_user else "Student"),
+        exam_name=invitation.exam.name, exam_starts_at=invitation.exam.starts_at,
+        invitation_url=f"{Settings.FRONTEND_URL.rstrip('/')}/redeem-invitation?token={token}",
+        expires_at=invitation.expires_at,
+    )
     return ExamInvitationWithToken(
         id=invitation.id, exam_id=invitation.exam_id, student_id=invitation.student_id,
         registration_id=invitation.registration_id, user_id=invitation.user_id,

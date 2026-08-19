@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FileSpreadsheet, Plus, Pencil, Trash2, Settings2, Calendar, Wallet } from "lucide-react";
+import { FileSpreadsheet, Plus, Pencil, Trash2, Settings2, Calendar, Wallet, Copy, ShieldCheck } from "lucide-react";
 import toast from "react-hot-toast";
 import { examsApi, examTypesApi } from "@/api/exams";
 import { apiErrorMessage } from "@/api/client";
@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/Input";
 import { Textarea } from "@/components/ui/Textarea";
 import { Select } from "@/components/ui/Select";
 import { Modal } from "@/components/ui/Modal";
+import { Switch } from "@/components/ui/Switch";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Badge, type BadgeProps } from "@/components/ui/Badge";
 import { formatCurrency, formatDateTime, toDatetimeLocalValue } from "@/lib/utils";
@@ -44,7 +45,16 @@ const emptyForm: ExamCreate = {
   fee: undefined,
   fee_currency: "INR",
   status: "draft",
+  proctoring_enabled: true,
+  fullscreen_required: true,
+  camera_required: false,
+  max_tab_switch_warnings: 3,
 };
+
+function copyLink(url: string) {
+  navigator.clipboard.writeText(url);
+  toast.success("Link copied");
+}
 
 export function ExamsPage() {
   const queryClient = useQueryClient();
@@ -75,6 +85,10 @@ export function ExamsPage() {
       fee: exam.fee ?? undefined,
       fee_currency: exam.fee_currency,
       status: (exam.status as ExamStatus) ?? "draft",
+      proctoring_enabled: exam.proctoring_enabled,
+      fullscreen_required: exam.fullscreen_required,
+      camera_required: exam.camera_required,
+      max_tab_switch_warnings: exam.max_tab_switch_warnings,
     });
     setModalOpen(true);
   }
@@ -154,6 +168,21 @@ export function ExamsPage() {
           {e.status ?? "draft"}
         </Badge>
       ),
+    },
+    {
+      header: "Public link",
+      accessor: (e) =>
+        e.public_url ? (
+          <button
+            onClick={() => copyLink(e.public_url!)}
+            title={e.public_url}
+            className="flex items-center gap-1.5 text-xs text-brand-300 hover:text-brand-200"
+          >
+            <Copy className="size-3.5" /> Copy link
+          </button>
+        ) : (
+          <span className="text-xs text-slate-600">—</span>
+        ),
     },
   ];
 
@@ -270,6 +299,42 @@ export function ExamsPage() {
               />
             </div>
           </div>
+
+          <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+            <h3 className="mb-3 flex items-center gap-2 text-sm font-medium text-white">
+              <ShieldCheck className="size-4 text-brand-300" /> Secure exam / proctoring
+            </h3>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Switch
+                checked={form.proctoring_enabled ?? true}
+                onChange={(proctoring_enabled) => setForm({ ...form, proctoring_enabled })}
+                label="Proctoring enabled"
+              />
+              <Switch
+                checked={form.fullscreen_required ?? true}
+                onChange={(fullscreen_required) => setForm({ ...form, fullscreen_required })}
+                label="Force fullscreen"
+              />
+              <Switch
+                checked={form.camera_required ?? false}
+                onChange={(camera_required) => setForm({ ...form, camera_required })}
+                label="Require camera access"
+              />
+              <Input
+                label="Tab-switch warnings allowed"
+                type="number"
+                min={0}
+                value={form.max_tab_switch_warnings ?? 3}
+                onChange={(e) =>
+                  setForm({ ...form, max_tab_switch_warnings: Number(e.target.value) || 0 })
+                }
+              />
+            </div>
+            <p className="mt-2 text-xs text-slate-500">
+              Exceeding the tab-switch/window-blur/fullscreen-exit warning count auto-disqualifies the attempt.
+            </p>
+          </div>
+
           <div className="flex gap-3 pt-2">
             <Button type="button" variant="glass" className="flex-1" onClick={() => setModalOpen(false)}>
               Cancel

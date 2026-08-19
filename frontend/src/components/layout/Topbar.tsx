@@ -61,9 +61,9 @@ export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: -8, scale: 0.97 }}
                 transition={{ duration: 0.15 }}
-                className="glass-panel absolute right-0 top-full mt-2 w-56 overflow-hidden !p-2"
+                className="glass-panel absolute right-0 top-full mt-2 w-56 overflow-hidden  bg-bg-950 !p-2"
               >
-                <div className="border-b border-white/10 px-3 py-2.5">
+                <div className="border-bz border-white/10 px-3 py-2.5">
                   <p className="truncate text-sm font-medium text-slate-100">{user.email ?? user.username}</p>
                   <p className="text-xs text-slate-500">{humanizeRole(user.role)}</p>
                 </div>

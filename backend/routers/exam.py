@@ -1,3 +1,5 @@
+import re
+import secrets
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -7,14 +9,20 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
 from core.deps import STAFF_ROLES, DbSession, require_roles
+from core.settings import Settings
 from models.auth import User
 from models.catalog import ExamType, Topic
 from models.entrance import ExamRegistration, ExamSlot, SlotHold
-from models.exam import Exam, ExamQuiz, ExamTopicWeight
+from models.exam import Exam, ExamProblem, ExamQuiz, ExamTopicWeight
+from models.problem import Problem
+from models.question import Question
 from models.quiz import Quiz
 from schemas.exam import (
     ExamCreate,
     ExamOut,
+    ExamProblemAssign,
+    ExamProblemOut,
+    ExamProblemUpdate,
     ExamQuizAssign,
     ExamQuizOut,
     ExamQuizUpdate,
@@ -31,6 +39,16 @@ from schemas.exam import (
 )
 
 router = APIRouter(prefix="/admin", tags=["entrance-exam"])
+
+_SLUG_RE = re.compile(r"[^a-z0-9]+")
+
+
+def _generate_public_slug(db: DbSession, name: str) -> str:
+    base = _SLUG_RE.sub("-", name.lower()).strip("-")[:40] or "exam"
+    while True:
+        candidate = f"{base}-{secrets.token_hex(3)}"
+        if db.execute(select(Exam).where(Exam.public_slug == candidate)).scalar_one_or_none() is None:
+            return candidate
 
 _ACTIVE_REGISTRATION_STATUSES = ("pending_payment", "confirmed", "completed")
 
@@ -113,7 +131,18 @@ def _get_exam_or_404(db: DbSession, exam_id: int, college_id: int) -> Exam:
     return exam
 
 
-def _serialize_exam(exam: Exam) -> ExamOut:
+def _serialize_exam(db: DbSession, exam: Exam) -> ExamOut:
+    registration_count = db.execute(
+        select(func.count(ExamRegistration.id)).where(
+            ExamRegistration.exam_id == exam.id,
+            ExamRegistration.status.in_(_ACTIVE_REGISTRATION_STATUSES),
+        )
+    ).scalar_one()
+    slot_count = db.execute(
+        select(func.count(ExamSlot.id)).where(
+            ExamSlot.exam_id == exam.id, ExamSlot.status != "cancelled"
+        )
+    ).scalar_one()
     return ExamOut(
         id=exam.id,
         college_id=exam.college_id,
@@ -127,6 +156,14 @@ def _serialize_exam(exam: Exam) -> ExamOut:
         fee=exam.fee,
         fee_currency=exam.fee_currency,
         status=exam.status,
+        public_slug=exam.public_slug,
+        public_url=f"{Settings.FRONTEND_URL.rstrip('/')}/e/{exam.public_slug}" if exam.public_slug else None,
+        proctoring_enabled=exam.proctoring_enabled,
+        fullscreen_required=exam.fullscreen_required,
+        camera_required=exam.camera_required,
+        max_tab_switch_warnings=exam.max_tab_switch_warnings,
+        registration_count=registration_count,
+        slot_count=slot_count,
         created_by=exam.created_by,
         created_at=exam.created_at,
     )
@@ -145,22 +182,27 @@ def list_exams(
     if status_ is not None:
         stmt = stmt.where(Exam.status == status_)
     exams = db.execute(stmt.order_by(Exam.id.desc())).scalars().all()
-    return [_serialize_exam(e) for e in exams]
+    return [_serialize_exam(db, e) for e in exams]
 
 
 @router.get("/exams/{exam_id}", response_model=ExamOut)
 def get_exam(exam_id: int, db: DbSession, user: User = Depends(require_roles(*STAFF_ROLES))):
-    return _serialize_exam(_get_exam_or_404(db, exam_id, user.college_id))
+    return _serialize_exam(db, _get_exam_or_404(db, exam_id, user.college_id))
 
 
 @router.post("/exams", response_model=ExamOut, status_code=status.HTTP_201_CREATED)
 def create_exam(payload: ExamCreate, db: DbSession, user: User = Depends(require_roles(*STAFF_ROLES))):
     if not db.get(ExamType, payload.exam_type_id):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "exam_type_id does not exist")
-    exam = Exam(college_id=user.college_id, created_by=user.id, **payload.model_dump())
+    exam = Exam(
+        college_id=user.college_id,
+        created_by=user.id,
+        public_slug=_generate_public_slug(db, payload.name),
+        **payload.model_dump(),
+    )
     db.add(exam)
     db.commit()
-    return _serialize_exam(_get_exam_or_404(db, exam.id, user.college_id))
+    return _serialize_exam(db, _get_exam_or_404(db, exam.id, user.college_id))
 
 
 @router.patch("/exams/{exam_id}", response_model=ExamOut)
@@ -175,10 +217,14 @@ def update_exam(
     if "exam_type_id" in data and data["exam_type_id"] is not None:
         if not db.get(ExamType, data["exam_type_id"]):
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "exam_type_id does not exist")
+    new_starts = data.get("starts_at", exam.starts_at)
+    new_ends = data.get("ends_at", exam.ends_at)
+    if new_starts and new_ends and new_ends <= new_starts:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "ends_at must be after starts_at")
     for field, value in data.items():
         setattr(exam, field, value)
     db.commit()
-    return _serialize_exam(_get_exam_or_404(db, exam.id, user.college_id))
+    return _serialize_exam(db, _get_exam_or_404(db, exam.id, user.college_id))
 
 
 @router.delete("/exams/{exam_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -277,7 +323,99 @@ def unassign_exam_quiz(
     db.commit()
 
 
+# ------------------------------------------------------------- exam problem
+
+@router.get("/exams/{exam_id}/problems", response_model=list[ExamProblemOut])
+def list_exam_problems(exam_id: int, db: DbSession, user: User = Depends(require_roles(*STAFF_ROLES))):
+    exam = _get_exam_or_404(db, exam_id, user.college_id)
+    rows = db.execute(
+        select(ExamProblem)
+        .where(ExamProblem.exam_id == exam.id)
+        .options(selectinload(ExamProblem.problem))
+        .order_by(ExamProblem.order_index)
+    ).scalars().all()
+    return [
+        ExamProblemOut(id=r.id, problem_id=r.problem_id, problem_title=r.problem.title, order_index=r.order_index, marks=r.marks)
+        for r in rows
+    ]
+
+
+@router.post("/exams/{exam_id}/problems", response_model=ExamProblemOut, status_code=status.HTTP_201_CREATED)
+def assign_exam_problem(
+    exam_id: int,
+    payload: ExamProblemAssign,
+    db: DbSession,
+    user: User = Depends(require_roles(*STAFF_ROLES)),
+):
+    exam = _get_exam_or_404(db, exam_id, user.college_id)
+    problem = db.execute(
+        select(Problem).where(Problem.id == payload.problem_id, Problem.college_id == user.college_id)
+    ).scalar_one_or_none()
+    if problem is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "problem_id does not exist for this college")
+
+    row = ExamProblem(exam_id=exam.id, problem_id=problem.id, order_index=payload.order_index, marks=payload.marks)
+    db.add(row)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, "This problem is already linked to the exam")
+    db.refresh(row)
+    return ExamProblemOut(id=row.id, problem_id=row.problem_id, problem_title=problem.title, order_index=row.order_index, marks=row.marks)
+
+
+@router.patch("/exams/{exam_id}/problems/{exam_problem_id}", response_model=ExamProblemOut)
+def update_exam_problem(
+    exam_id: int,
+    exam_problem_id: int,
+    payload: ExamProblemUpdate,
+    db: DbSession,
+    user: User = Depends(require_roles(*STAFF_ROLES)),
+):
+    exam = _get_exam_or_404(db, exam_id, user.college_id)
+    row = db.execute(
+        select(ExamProblem)
+        .where(ExamProblem.id == exam_problem_id, ExamProblem.exam_id == exam.id)
+        .options(selectinload(ExamProblem.problem))
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Exam-problem link not found")
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(row, field, value)
+    db.commit()
+    db.refresh(row)
+    return ExamProblemOut(id=row.id, problem_id=row.problem_id, problem_title=row.problem.title, order_index=row.order_index, marks=row.marks)
+
+
+@router.delete("/exams/{exam_id}/problems/{exam_problem_id}", status_code=status.HTTP_204_NO_CONTENT)
+def unassign_exam_problem(
+    exam_id: int,
+    exam_problem_id: int,
+    db: DbSession,
+    user: User = Depends(require_roles(*STAFF_ROLES)),
+):
+    exam = _get_exam_or_404(db, exam_id, user.college_id)
+    row = db.execute(
+        select(ExamProblem).where(ExamProblem.id == exam_problem_id, ExamProblem.exam_id == exam.id)
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Exam-problem link not found")
+    db.delete(row)
+    db.commit()
+
+
 # --------------------------------------------------------- exam topic weight
+
+def _active_question_count(db: DbSession, college_id: int, topic_id: int) -> int:
+    return db.execute(
+        select(func.count(Question.id)).where(
+            Question.college_id == college_id,
+            Question.topic_id == topic_id,
+            Question.is_active.is_(True),
+        )
+    ).scalar_one()
+
 
 @router.get("/exams/{exam_id}/topic-weights", response_model=list[ExamTopicWeightOut])
 def list_topic_weights(exam_id: int, db: DbSession, user: User = Depends(require_roles(*STAFF_ROLES))):
@@ -309,6 +447,13 @@ def add_topic_weight(
     ).scalar_one_or_none()
     if topic is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "topic_id does not exist for this college")
+
+    available = _active_question_count(db, user.college_id, topic.id)
+    if payload.question_count > available:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"{topic.name} only has {available} active question(s) — reduce question_count or add more questions to this topic first",
+        )
 
     row = ExamTopicWeight(
         exam_id=exam.id, topic_id=topic.id, question_count=payload.question_count, weight=payload.weight
@@ -342,7 +487,15 @@ def update_topic_weight(
     ).scalar_one_or_none()
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Topic weight not found")
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    data = payload.model_dump(exclude_unset=True)
+    if "question_count" in data:
+        available = _active_question_count(db, user.college_id, row.topic_id)
+        if data["question_count"] > available:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"{row.topic.name} only has {available} active question(s) — reduce question_count or add more questions to this topic first",
+            )
+    for field, value in data.items():
         setattr(row, field, value)
     db.commit()
     db.refresh(row)
@@ -393,6 +546,7 @@ def _serialize_slot(db: DbSession, slot: ExamSlot) -> ExamSlotOut:
     return ExamSlotOut(
         id=slot.id,
         college_id=slot.college_id,
+        exam_id=slot.exam_id,
         name=slot.name,
         starts_at=slot.starts_at,
         ends_at=slot.ends_at,
@@ -416,9 +570,12 @@ def _get_slot_or_404(db: DbSession, slot_id: int, college_id: int) -> ExamSlot:
 def list_exam_slots(
     db: DbSession,
     user: User = Depends(require_roles(*STAFF_ROLES)),
+    exam_id: Optional[int] = None,
     status_: Optional[str] = None,
 ):
     stmt = select(ExamSlot).where(ExamSlot.college_id == user.college_id)
+    if exam_id is not None:
+        stmt = stmt.where(ExamSlot.exam_id == exam_id)
     if status_ is not None:
         stmt = stmt.where(ExamSlot.status == status_)
     slots = db.execute(stmt.order_by(ExamSlot.starts_at)).scalars().all()
@@ -434,6 +591,7 @@ def get_exam_slot(slot_id: int, db: DbSession, user: User = Depends(require_role
 def create_exam_slot(payload: ExamSlotCreate, db: DbSession, user: User = Depends(require_roles(*STAFF_ROLES))):
     if payload.ends_at <= payload.starts_at:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "ends_at must be after starts_at")
+    _get_exam_or_404(db, payload.exam_id, user.college_id)
     slot = ExamSlot(college_id=user.college_id, **payload.model_dump())
     db.add(slot)
     db.commit()

@@ -11,7 +11,9 @@ from models.quiz import Quiz, QuizClassTarget
 from models.quiz_attempt import QuizAttempt, QuizAnswer
 from models.entrance import ExamSlot, ExamRegistration, SlotHold
 from models.payment import Payment
-from models.exam import Exam, ExamQuiz, ExamTopicWeight, ExamInvitation
+from models.exam import Exam, ExamQuiz, ExamProblem, ExamTopicWeight, ExamInvitation
+from models.verification import OtpVerification
+from models.document import StudentDocument
 from models.attempt import ExamAttempt, ExamAnswer
 from models.proctoring import ProctoringEvent, ProctoringSnapshot
 from models.problem import Problem, ProblemTopic, TestCase, Submission, ProblemUnlock
@@ -49,8 +51,11 @@ __all__ = [
     "Payment",
     "Exam",
     "ExamQuiz",
+    "ExamProblem",
     "ExamTopicWeight",
     "ExamInvitation",
+    "OtpVerification",
+    "StudentDocument",
     "ExamAttempt",
     "ExamAnswer",
     "ProctoringEvent",

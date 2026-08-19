@@ -17,7 +17,7 @@ export function AppShell() {
   return (
     <div className="flex min-h-screen bg-bg-950">
       <AuroraBackground />
-      <Sidebar role={user.role} open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+      <Sidebar role={user.role} studentStage={user.student_stage} open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
       <div className="flex min-h-screen flex-1 flex-col lg:pl-0">
         <Topbar onMenuClick={() => setSidebarOpen(true)} />
